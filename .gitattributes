@@ -1,0 +1,3 @@
+# Byte-exact: the render-helper update feed is SIGNED over the exact bytes of each file, so git must never
+# convert line endings or otherwise touch them (a CRLF/LF change would make every helper reject the update).
+* -text

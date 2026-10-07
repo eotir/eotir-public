@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<script>
+  // Set the theme before first paint so there is no flash: ?theme=light|dark, else the saved choice, else dark.
+  try {
+    var q = new URLSearchParams(location.search).get('theme') || localStorage.getItem('eotirTheme') || 'dark';
+    document.documentElement.setAttribute('data-theme', q === 'light' ? 'light' : 'dark');
+  } catch (e) {}
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the Render Helper Works</title>
+<style>
+  :root {
+    --bg: #0a0a14; --panel: #12081e; --surface: #1a1024; --line: #2c1d3d;
+    --text: #ece8f4; --muted: #a79cbb; --magenta: #d785db; --blue: #8caeff; --ok: #6fd6a0;
+  }
+  /* Dark is the default (matches the EOTIR music player). Light is a companion mode, chosen with the
+     button top-right or ?theme=light; the choice is remembered. */
+  :root[data-theme="light"] {
+    --bg: #f6f3fb; --panel: #ffffff; --surface: #efe9f8; --line: #d9cdea;
+    --text: #1d1530; --muted: #5d5075; --magenta: #a437a8; --blue: #2c5bd1; --ok: #1f8a57;
+  }
+  .theme-btn {
+    position: fixed; top: 14px; right: 14px; z-index: 10; cursor: pointer;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 14px; font: 600 14px "Segoe UI", system-ui, sans-serif;
+  }
+  .theme-btn:hover { border-color: var(--magenta); }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px 64px; }
+  header { padding: 48px 0 8px; }
+  .eyebrow { color: var(--magenta); letter-spacing: .18em; text-transform: uppercase; font-size: 13px; font-weight: 600; }
+  h1 { margin: 6px 0 8px; font-size: 38px; line-height: 1.15; }
+  .lede { color: var(--muted); font-size: 19px; margin: 0; }
+  h2 { margin: 48px 0 8px; font-size: 24px; }
+  h2 span { color: var(--blue); }
+  p { margin: 8px 0 16px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 22px; margin: 16px 0;
+  }
+  .card.note { border-left: 4px solid var(--magenta); }
+  .card.good { border-left: 4px solid var(--ok); }
+  .diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 8px; margin: 16px 0; overflow-x: auto; }
+  .diagram .mermaid { display: flex; justify-content: center; }
+  ol.steps { padding-left: 0; list-style: none; counter-reset: s; margin: 16px 0; }
+  ol.steps li {
+    counter-increment: s; position: relative; margin: 10px 0; padding: 12px 16px 12px 58px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 14px; top: 10px; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--surface); color: var(--magenta); font-weight: 700; display: grid; place-items: center;
+    border: 1px solid var(--line);
+  }
+  ol.steps li.long { border-color: var(--magenta); }
+  ol.steps b { color: var(--text); }
+  ol.steps small { display: block; color: var(--muted); font-size: 15px; }
+  ul { padding-left: 22px; } li { margin: 6px 0; }
+  code, kbd { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; font: 15px Consolas, monospace; color: var(--blue); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } h1 { font-size: 30px; } }
+  .grid .card { margin: 0; }
+  .grid h3 { margin: 0 0 6px; font-size: 17px; }
+  footer { color: var(--muted); font-size: 14px; margin-top: 48px; text-align: center; }
+  .tldr { background: linear-gradient(135deg, var(--panel), var(--surface)); border: 1px solid var(--magenta); border-radius: 16px; padding: 22px 24px 8px; margin: 22px 0 8px; }
+  .tldr-title { color: var(--magenta); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 14px; margin-bottom: 12px; }
+  .tldr-steps div { font-size: 21px; margin: 10px 0; display: flex; align-items: center; gap: 14px; }
+  .tldr-steps span { flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--magenta); color: var(--bg); font-weight: 800; display: grid; place-items: center; font-size: 18px; }
+  .tldr p { color: var(--muted); font-size: 16px; }
+  .tldr-steps p.t { margin: 0; color: var(--text); font-size: 21px; }
+  details { margin: 12px 0; }
+  summary { cursor: pointer; color: var(--blue); font-weight: 600; padding: 8px 0; }
+  #nodiagram { display: none; color: var(--muted); font-size: 15px; text-align: center; }
+</style>
+</head>
+<body>
+<button class="theme-btn" id="themeBtn" type="button" aria-label="Switch between dark and light mode">Light mode</button>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">EOTIR Music Project</div>
+  <h1>How the Render Helper works</h1>
+  <p class="lede">A simple guide to what happens when you double-click <b>Start Rendering</b>. You don't need to understand any of it to help &mdash; this is just so nothing feels mysterious.</p>
+</header>
+
+<div class="tldr">
+  <div class="tldr-title">The 30-second version</div>
+  <div class="tldr-steps">
+    <div><span>1</span><p class="t"><b>Double-click</b> <code>Start Rendering</code></p></div>
+    <div><span>2</span><p class="t"><b>Leave it running</b> for 1&ndash;2 hours (plugged in, lid open)</p></div>
+    <div><span>3</span><p class="t">When it says <b>ALL DONE</b>, that video is finished &mdash; thank you! It then waits for the next one by itself. Press <b>Q</b> (or close the window) to stop.</p></div>
+  </div>
+  <p>Nothing to install. Nothing to type. Nothing is changed on your PC &mdash; and deleting one folder removes every trace.</p>
+</div>
+
+<h2>In one sentence</h2>
+<div class="card note">
+  Our music videos are put together from pictures, short video clips and a song. <b>Putting them together takes a lot of computer power</b> &mdash; so Ryan hands the job to a friend's computer (yours!), which builds the finished video and sends it back.
+</div>
+
+<h2>The big picture</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  A["Ryan prepares a video job&lt;br/&gt;pictures, video clips and music"] --&gt; B[("Ryan's private&lt;br/&gt;file server")]
+  B -- "you download it" --&gt; C["YOUR computer&lt;br/&gt;makes the video"]
+  C -- "you send it back" --&gt; B
+  B --&gt; D["Ryan checks the video&lt;br/&gt;and shares it with the world"]
+</pre>
+</div>
+<p>Everything travels through Ryan's private server. Your computer never talks to anyone else, and nobody can reach into your computer.</p>
+
+<h2>What the helper does, step by step</h2>
+<p>When you open it, a window with big letters shows each of these steps as it happens, with a progress bar.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  s1["1. Check your computer&lt;br/&gt;Is Windows ready? Enough space?"] --&gt; s2["2. Get the video tools&lt;br/&gt;Node.js - first time only"]
+  s2 --&gt; s3["3. Get the EOTIR render kit&lt;br/&gt;first time only"]
+  s3 --&gt; s4["4. Connect to Ryan's server&lt;br/&gt;and find your video job"]
+  s4 --&gt; s5["5. Download the job&lt;br/&gt;and check nothing is damaged"]
+  s5 --&gt; s6["6. Make the video&lt;br/&gt;THE LONG PART, 1 to 2 hours"]
+  s6 --&gt; s7["7. Send it back&lt;br/&gt;and tidy up"]
+  s7 --&gt; done(["All done - thank you!"])
+  classDef long fill:#c050c0,stroke:#ffffff,color:#ffffff
+  class s6 long
+</pre>
+</div>
+
+<details>
+<summary>What each step does (optional)</summary>
+<ol class="steps">
+  <li><b>Check your computer</b><small>Makes sure Windows is recent enough, you have about 15 GB free, and the built-in file-transfer tools are there. Takes a few seconds.</small></li>
+  <li><b>Get the video tools</b><small>Downloads a small free program called Node.js that runs the video maker. Only the first time (a minute or two). It goes in one folder and changes nothing else on your PC.</small></li>
+  <li><b>Get the EOTIR render kit</b><small>This is Ryan's own video-making recipe, so your video comes out identical to his. First time only: about 5&ndash;10 minutes.</small></li>
+  <li><b>Connect and find your job</b><small>Logs in to Ryan's server with your personal key and looks for a video set aside for you. If there isn't one, it waits and checks again every few minutes, then starts by itself the moment Ryan queues one &mdash; that's fine!</small></li>
+  <li><b>Download the job</b><small>Pulls down the pictures, clips and music, then double-checks nothing got damaged on the way. If your internet drops, run it again &mdash; it carries on where it stopped.</small></li>
+  <li class="long"><b>Make the video &mdash; the long part</b><small>Your computer draws and joins up every frame. Expect <b>1&ndash;2 hours</b>, a busy processor and spinning fans. That's normal and safe. The bar shows frame count and time left.</small></li>
+  <li><b>Send it back</b><small>Checks the finished video is the right length, uploads it to Ryan's server, makes sure every byte arrived, then deletes the big temporary files so your disk is free again. After that it looks for your next video.</small></li>
+</ol>
+</details>
+
+<h2>The conversation with Ryan's server</h2>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  participant You as Your computer
+  participant Srv as Ryan's server
+  You-&gt;&gt;Srv: Hi, it is me (secure key)
+  Srv--&gt;&gt;You: Welcome. Here is your video job
+  You-&gt;&gt;Srv: Please send the job files
+  Srv--&gt;&gt;You: Pictures, clips and music (80 MB to 1 GB)
+  Note over You: Builds the video - the long part
+  You-&gt;&gt;Srv: Here is the finished video
+  Srv--&gt;&gt;You: Got every byte, thank you!
+</pre>
+</div>
+<p id="nodiagram">(The diagrams need an internet connection to draw. The text on this page says the same thing.)</p>
+
+<h2>What stays on your computer, and what doesn't</h2>
+<div class="grid">
+  <div class="card good">
+    <h3>Stays private</h3>
+    <ul>
+      <li>Your files, photos and documents &mdash; the helper never looks at them.</li>
+      <li>Your passwords and accounts.</li>
+      <li>Your personal key stays on your PC (it only proves to the server that it's you).</li>
+    </ul>
+  </div>
+  <div class="card note">
+    <h3>What gets sent</h3>
+    <ul>
+      <li>The finished video, to Ryan.</li>
+      <li>If something goes wrong: a short report with an error code and basic info (Windows version, free space, what step failed). No personal files.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>If something goes wrong</h2>
+<div class="card">
+  <p style="margin-top:0">Don't worry &mdash; nothing on your computer is harmed. The window will show a big <b>ERROR CODE</b> (like <code>E-RENDER</code>) and a plain explanation. The helper also <b>sends a report to Ryan automatically</b>, so you can just tell him the code. You can always double-click again; it picks up where it left off.</p>
+</div>
+
+<h2>Keeping it tidy</h2>
+<ul>
+  <li><b>While it works:</b> keep the window open, keep your computer plugged in and don't close the lid. It keeps going from one video to the next; to stop, press <b>Q</b> (it finishes the video it's on first) or just close the window. You can use your PC normally &mdash; it may feel a bit slower.</li>
+  <li><b>Remove everything:</b> delete the folder <code>%LOCALAPPDATA%\Eotir</code> (paste it into File Explorer's address bar). That's every trace of it. (A few PCs use <code>C:\Users\Public\Eotir</code> instead &mdash; the window tells you.)</li>
+  <li><b>Curious what it does exactly?</b> The file <code>eotir-render.ps1</code> is plain readable text &mdash; open it in Notepad.</li>
+</ul>
+
+<footer>EOTIR Music Project &middot; Render Helper &middot; thank you for lending your computer!</footer>
+</div>
+
+<script>
+  // Theme button: switches INSTANTLY in the page (no reload), so it works even where the browser blocks
+  // saved settings for local files. Remembering the choice is a bonus (try/catch). The diagrams redraw via
+  // the 'themechange' event handled by the module script below.
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    function label() { btn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? 'Dark mode' : 'Light mode'; }
+    label();
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('eotirTheme', next); } catch (e) {}
+      label();
+      window.dispatchEvent(new Event('themechange'));
+    });
+  })();
+</script>
+<script type="module">
+  const root = document.documentElement;
+  const isDark = () => root.getAttribute('data-theme') !== 'light';
+  const font = 'Segoe UI, system-ui, sans-serif';
+  const palettes = {
+    dark: {
+      background: '#12081e', primaryColor: '#1a1024', primaryBorderColor: '#8caeff', primaryTextColor: '#ece8f4',
+      lineColor: '#d785db', secondaryColor: '#1a1024', tertiaryColor: '#12081e', textColor: '#ece8f4',
+      noteBkgColor: '#2c1d3d', noteTextColor: '#ece8f4', actorBkg: '#1a1024', actorBorder: '#8caeff',
+      actorTextColor: '#ece8f4', signalColor: '#d785db', signalTextColor: '#ece8f4', fontFamily: font
+    },
+    light: {
+      background: '#ffffff', primaryColor: '#efe9f8', primaryBorderColor: '#2c5bd1', primaryTextColor: '#1d1530',
+      lineColor: '#a437a8', secondaryColor: '#efe9f8', tertiaryColor: '#ffffff', textColor: '#1d1530',
+      noteBkgColor: '#efe9f8', noteTextColor: '#1d1530', actorBkg: '#efe9f8', actorBorder: '#2c5bd1',
+      actorTextColor: '#1d1530', signalColor: '#a437a8', signalTextColor: '#1d1530', fontFamily: font
+    }
+  };
+  // Keep each diagram's source so it can be redrawn in the other theme without reloading the page.
+  const holders = [...document.querySelectorAll('.diagram')].map(el => ({ el, src: el.querySelector('pre.mermaid').textContent }));
+  let mermaid = null;
+  let drawing = Promise.resolve();
+
+  function draw() {
+    // serialise redraws so rapid clicks cannot interleave
+    drawing = drawing.then(async () => {
+      if (!mermaid) return;
+      mermaid.initialize({
+        startOnLoad: false, theme: 'base',
+        flowchart: { curve: 'basis', htmlLabels: true, nodeSpacing: 36, rankSpacing: 36 },
+        themeVariables: isDark() ? palettes.dark : palettes.light
+      });
+      for (const h of holders) {
+        h.el.innerHTML = '<pre class="mermaid"></pre>';
+        const pre = h.el.querySelector('pre');
+        pre.textContent = h.src;
+        await mermaid.run({ nodes: [pre] });
+      }
+    }).catch(() => {});
+    return drawing;
+  }
+
+  window.addEventListener('themechange', draw);
+  try {
+    ({ default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'));
+    await draw();
+  } catch (e) {
+    document.getElementById('nodiagram').style.display = 'block';
+    holders.forEach(h => { h.el.style.display = 'none'; });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "build": 5,
+  "version": "2026-10-06.5",
+  "released": "2026-10-07T10:29:46+00:00",
+  "notes": "First public release: Windows helper keeps going and waits for jobs; Linux helper; signed self-updates.",
+  "files": [
+    {
+      "path": "eotir-render.ps1",
+      "sha256": "ce6f698ea60e78d475021e0cd5b18f41165bc50bd36e9de43e92c45f1ed2f373",
+      "bytes": 62823
+    },
+    {
+      "path": "How It Works.html",
+      "sha256": "30eaadfdc4d8cbc87ea292b4eda1dd3df450a0ed95f7b09f050c065cdac58120",
+      "bytes": 15146
+    }
+  ],
+  "linux": {
+    "build": 2,
+    "version": "2026-10-06.2",
+    "notes": "First public release: Windows helper keeps going and waits for jobs; Linux helper; signed self-updates.",
+    "files": [
+      {
+        "path": "eotir-render.sh",
+        "sha256": "64c056a8ebae1799489afd7a4b7b3d4b2f829253b47dd2ee4e7f4dd7bc233030",
+        "bytes": 53596
+      },
+      {
+        "path": "How It Works.html",
+        "sha256": "30eaadfdc4d8cbc87ea292b4eda1dd3df450a0ed95f7b09f050c065cdac58120",
+        "bytes": 15146
+      }
+    ]
+  }
+}
