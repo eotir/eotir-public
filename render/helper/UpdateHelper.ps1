@@ -12,8 +12,24 @@ Write-Host "  EOTIR MUSIC PROJECT - Helper updater" -ForegroundColor Cyan
 Write-Host "  This brings your helper up to date. It keeps your key and settings."
 Write-Host ""
 
-if (-not (Test-Path -LiteralPath (Join-Path $Dir "helper_key")) -or -not (Test-Path -LiteralPath (Join-Path $Dir "helper.json"))) {
-    Stop-Here "This file must sit in your EOTIR Render Helper folder (the one with helper_key and Start Rendering.cmd)."
+function Test-HelperDir([string]$d) { return ($d -and (Test-Path -LiteralPath (Join-Path $d "helper_key")) -and (Test-Path -LiteralPath (Join-Path $d "helper.json"))) }
+if (-not (Test-HelperDir $Dir)) {
+    # Not run from inside the helper folder: look for it in the usual places.
+    $found = @()
+    foreach ($r in @("$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads", "$env:USERPROFILE\Documents", "$env:USERPROFILE\OneDrive", "$env:LOCALAPPDATA", "C:\Users\Public")) {
+        if (Test-Path -LiteralPath $r) {
+            $found += @(Get-ChildItem -LiteralPath $r -Filter helper_key -Recurse -Depth 4 -File -ErrorAction SilentlyContinue | ForEach-Object { $_.DirectoryName } | Where-Object { Test-HelperDir $_ })
+        }
+    }
+    $found = @($found | Select-Object -Unique)
+    if ($found.Count -eq 1) { $Dir = $found[0]; Write-Host ("  Found your helper folder: " + $Dir) -ForegroundColor White }
+    else {
+        Write-Host "  I could not find your helper folder by myself." -ForegroundColor Yellow
+        Write-Host "  Open it in File Explorer, click the address bar, copy the path, and paste it here."
+        $typed = (Read-Host "  Folder path").Trim().Trim('"')
+        if (-not (Test-HelperDir $typed)) { Stop-Here "That folder does not have helper_key and helper.json in it." }
+        $Dir = $typed
+    }
 }
 if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue) -or -not (Get-Command ssh-keygen.exe -ErrorAction SilentlyContinue)) {
     Stop-Here "Windows is missing curl or OpenSSH (normally built in). Please tell Ryan."
