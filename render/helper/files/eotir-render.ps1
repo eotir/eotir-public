@@ -176,8 +176,8 @@ function Show-Banner {
 $script:ErrCode = $null
 # ScriptBuild is the MONOTONIC release number the self-updater compares (publish_update.py reads this
 # line). Bump it on every release; the label is for humans.
-$script:ScriptBuild = 5
-$script:ScriptVersion = "2026-10-06.5"
+$script:ScriptBuild = 6
+$script:ScriptVersion = "2026-10-15.6"
 $script:StartTime = Get-Date
 function Fail([string]$code, [string]$what) { $script:ErrCode = $code; Write-Log ("FAIL [{0}] {1}" -f $code, $what); throw $what }
 
@@ -891,6 +891,7 @@ try {
         job_id = $j.job_id; helper = $script:Cfg.user; out_name = $j.out_name; bytes = $outSize; sha256 = $sha
         duration = $durNum; render_seconds = [int]$renderSecs; cores = [Environment]::ProcessorCount
         kit_version = $kit.version; finished_utc = (Get-Date).ToUniversalTime().ToString("o")
+        ready_for_qc = $true; job_zip_sha256 = $j.zip.sha256
     }
     ($rep | ConvertTo-Json) | Set-Content -LiteralPath $report -Encoding ASCII
     # Finalize in two steps that are each safe to repeat (a retried connection must not trip over work already done):
@@ -899,7 +900,10 @@ try {
         $fin = Invoke-Sftp @("-rm `"$final`"", "rename `"$part`" `"$final`"")
         if ($fin.Code -ne 0 -and (Get-RemoteSize $final) -ne $outSize) { Write-Log $fin.Out; Fail "E-UPLOAD-FINAL" "The video arrived but could not be finalized. Tell Ryan - it is safe on his server." }
     }
-    $fin2 = Invoke-Sftp @("put `"$(Fwd $report)`" `"$final.json`"")
+    # The completed report is Vector's notification signal. Publish it last,
+    # atomically, so the notifier never reads a half-uploaded completion report.
+    # Discord credentials stay on Vector; a Discord outage cannot fail a render.
+    $fin2 = Invoke-Sftp @("put `"$(Fwd $report)`" `"$final.json.partial`"", "rename `"$final.json.partial`" `"$final.json`"")
     if ($fin2.Code -ne 0) { Write-Log $fin2.Out; Fail "E-UPLOAD-FINAL" "The video arrived but its report could not be sent. Tell Ryan - the video is safe on his server." }
     Good "Delivered! Ryan's server has your video."
     End-Step

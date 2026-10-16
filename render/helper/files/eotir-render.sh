@@ -37,8 +37,8 @@
 set -u -o pipefail -E
 
 # SCRIPT_BUILD is the MONOTONIC release number the self-updater compares (publish_update.py reads this line).
-SCRIPT_BUILD=2
-SCRIPT_VERSION="2026-10-06.2"
+SCRIPT_BUILD=3
+SCRIPT_VERSION="2026-10-15.3"
 
 SELF_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 PKG_DIR="$(dirname "$SELF_PATH")"
@@ -828,15 +828,17 @@ main() {
         have=$(remote_size "$part")
         [ "$have" != "$size" ] && fail "E-UPLOAD-SIZE" "The server has $have bytes but we sent $size. Please run this again."
         local report="$work/$J_OUT.json"
-        printf '{\n  "job_id": "%s",\n  "helper": "%s",\n  "out_name": "%s",\n  "bytes": %s,\n  "sha256": "%s",\n  "duration": %s,\n  "render_seconds": %s,\n  "cores": %s,\n  "platform": "linux",\n  "kit_version": "%s",\n  "finished_utc": "%s"\n}\n' \
-            "$J_ID" "$USER_NAME" "$J_OUT" "$size" "$sha" "$dur" "$render_secs" "$(nproc)" "$kit_version" "$(date -u +%FT%TZ)" >"$report"
+        printf '{\n  "job_id": "%s",\n  "helper": "%s",\n  "out_name": "%s",\n  "bytes": %s,\n  "sha256": "%s",\n  "duration": %s,\n  "render_seconds": %s,\n  "cores": %s,\n  "platform": "linux",\n  "kit_version": "%s",\n  "finished_utc": "%s",\n  "ready_for_qc": true,\n  "job_zip_sha256": "%s"\n}\n' \
+            "$J_ID" "$USER_NAME" "$J_OUT" "$size" "$sha" "$dur" "$render_secs" "$(nproc)" "$kit_version" "$(date -u +%FT%TZ)" "$J_ZSHA" >"$report"
         # Finalize in two steps that are each safe to repeat: 1) put the video in place (skipped if the final file is already
         # there at the right size); 2) put the report.
         if [ "$(remote_size "$final")" != "$size" ]; then
             sftp_run "-rm \"$final\"" "rename \"$part\" \"$final\""
             if [ "$SFTP_CODE" -ne 0 ] && [ "$(remote_size "$final")" != "$size" ]; then logf "$SFTP_OUT"; fail "E-UPLOAD-FINAL" "The video arrived but could not be finalized. Tell Ryan - it is safe on his server."; fi
         fi
-        sftp_run "put \"$report\" \"$final.json\""
+        # Publish the report atomically LAST: this is the completion signal for
+        # Vector's Discord notifier. No webhook secret travels with the helper.
+        sftp_run "put \"$report\" \"$final.json.partial\"" "rename \"$final.json.partial\" \"$final.json\""
         [ "$SFTP_CODE" -ne 0 ] && { logf "$SFTP_OUT"; fail "E-UPLOAD-FINAL" "The video arrived but its report could not be sent. Tell Ryan - the video is safe on his server."; }
         good "Delivered! Ryan's server has your video."
         end_step
